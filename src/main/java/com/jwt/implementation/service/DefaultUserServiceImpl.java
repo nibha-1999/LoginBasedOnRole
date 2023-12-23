@@ -4,6 +4,8 @@ import java.util.Collection;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
@@ -21,22 +23,29 @@ import com.jwt.implementation.repository.UserRepository;
 @Service
 public class DefaultUserServiceImpl implements DefaultUserService {
 
+	private final Logger logger = LoggerFactory.getLogger(DefaultUserServiceImpl.class);
+
 	@Autowired
 	private UserRepository userRepo;
 
 	@Autowired
 	private RoleRepository roleRepo;
 
-	private BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+	private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
 	@Override
 	public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
-		User user = userRepo.findByUserName(username);
-		return new org.springframework.security.core.userdetails.User(
-				user.getUserName(),
-				user.getPassword(),
-				mapRolesToAuthorities(user.getRole())
-		);
+		try {
+			User user = userRepo.findByUserName(username);
+			return new org.springframework.security.core.userdetails.User(
+					user.getUserName(),
+					user.getPassword(),
+					mapRolesToAuthorities(user.getRole())
+			);
+		} catch (Exception ex) {
+			logger.error("Error loading user by username: {}", ex.getMessage());
+			throw new UsernameNotFoundException("Error loading user by username", ex);
+		}
 	}
 
 	public Collection<? extends GrantedAuthority> mapRolesToAuthorities(Set<Role> roles) {
@@ -47,27 +56,33 @@ public class DefaultUserServiceImpl implements DefaultUserService {
 
 	@Override
 	public User save(UserDTO userRegisteredDTO) {
-		if (userRegisteredDTO == null || userRegisteredDTO.getRole() == null) {
-			throw new IllegalArgumentException("UserDTO or role cannot be null");
+		try {
+			if (userRegisteredDTO == null || userRegisteredDTO.getRole() == null) {
+				throw new IllegalArgumentException("UserDTO or role cannot be null");
+			}
+
+			Role role;
+
+			// Add a null check for userRegisteredDTO.getRole() before comparing its value
+			if ("USER".equals(userRegisteredDTO.getRole())) {
+				role = roleRepo.findByRole("ROLE_USER");
+			} else if ("ADMIN".equals(userRegisteredDTO.getRole())) {
+				role = roleRepo.findByRole("ROLE_ADMIN");
+			} else {
+				throw new IllegalArgumentException("Invalid role: " + userRegisteredDTO.getRole());
+			}
+
+			User user = new User();
+			user.setEmail(userRegisteredDTO.getEmail());
+			user.setUserName(userRegisteredDTO.getUserName());
+			user.setPassword(passwordEncoder.encode(userRegisteredDTO.getPassword()));
+			user.setRole(role);
+
+			return userRepo.save(user);
+		} catch (Exception ex) {
+			logger.error("Error saving user: {}", ex.getMessage());
+			// You may want to throw a custom exception here
+			throw new RuntimeException("Error saving user", ex);
 		}
-
-		Role role;
-
-		// Add a null check for userRegisteredDTO.getRole() before comparing its value
-		if ("USER".equals(userRegisteredDTO.getRole())) {
-			role = roleRepo.findByRole("ROLE_USER");
-		} else if ("ADMIN".equals(userRegisteredDTO.getRole())) {
-			role = roleRepo.findByRole("ROLE_ADMIN");
-		} else {
-			throw new IllegalArgumentException("Invalid role: " + userRegisteredDTO.getRole());
-		}
-
-		User user = new User();
-		user.setEmail(userRegisteredDTO.getEmail());
-		user.setUserName(userRegisteredDTO.getUserName());
-		user.setPassword(passwordEncoder.encode(userRegisteredDTO.getPassword()));
-		user.setRole(role);
-
-		return userRepo.save(user);
 	}
 }
